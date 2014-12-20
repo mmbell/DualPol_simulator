@@ -1,12 +1,13 @@
 using ArgParse
 using NetCDF
 using DataStructures
+using Debug
 
 # Global constants
-xam_r = pi*1000/6.
-xbm_r = 3.
-xmu_r = 0.
-xobmr = 1./xbm_r
+xam_r = pi*997.0/6.0
+xbm_r = 3.0
+xmu_r = 0.0
+xobmr = 1.0/xbm_r
 xcre = 1. + 2.*xbm_r + xmu_r
 
 function parse_commandline()
@@ -27,11 +28,13 @@ end
 
 function read_WRF()
   ### Read in cartesian analysis
+  println("Reading ",filein)
   centerX = 0; centerY = 0 ### TC center in km (in relation to x,y arrays)  # How was this defined??
-  dims = ["XLAT","XLONG","ZNU","Times"]
-  vars = ["QRAIN","QNRAIN","QVAPOR","PB","P","T","REFL_10cm"]
-  lat,lon,eta,times = read_nc_var(filein,dims)
-  qrain,qnrain,qv,pb,pp,tempk,refl = read_nc_var(filein,vars)
+  #dims = ["XLAT","XLONG","ZNU"]
+  dims = ["south_north","east_west","bottom_top"]
+  vars = ["QRAIN","QNRAIN","QVAPOR","PB","P","T","REFL_10CM"]
+  lat,lon,eta = read_nc_var(filein,dims)
+  qrain,qnrain,qv,pb,pp,theta,refl = read_nc_var(filein,vars)
   d1,d2,d3,d4 = size(qrain)
 
   # Initialize new radar variables
@@ -40,24 +43,32 @@ function read_WRF()
   ZH      = similar(qrain); fill!(ZH, -999)
   DBZ      = similar(qrain); fill!(DBZ, -999)
 
+  println("Calculating radar variables...")
   gamma1 = gamma(1. + xbm_r + xmu_r)
   gamma2 = gamma(1. + xmu_r)
+  xorg2 = 1.0/gamma2
   for t in [1:d4]
     for k in [1:d3]
       for j in [1:d2]
         for i in [1:d1]
+	  qvapor = max(1.0e-10,qv[i,j,k,t])
           pressure = pb[i,j,k,t]+pp[i,j,k,t]
-          rho = 0.622*pressure/(287.0*tempk[i,j,k,t]*(qv[i,j,k,t]+0.622))
-          if (qrain[i,j,k,t] .gt. 1.0e-9) then
+          tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
+          rho = 0.622*pressure/(287.0*tempk*(qvapor+0.622))
+  #        println("PTQ: ", pressure, ", ", tempk,", ", qvapor)
+         if (qrain[i,j,k,t] > 1.0e-9) && (qnrain[i,j,k,t] > 0.0)
             qrv = qrain[i,j,k,t]*rho
             nrv = qnrain[i,j,k,t]*rho
+ #	    println("L: ", nrv, " ", qrv, " ", rho)
+          lambda = (xam_r*gamma1*xorg2*nrv/qrv)^xobmr
+            N0 = nrv*xorg2*lambda^gamma2
+            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t] = calc_radar_variables(N0,lambda)
           else
-            qrv = 1.0e-12
-            nrv = 1.0e-12
+            #qrv = 1.0e-12
+            #nrv = 1.0e-12
+	    ZDR[i,j,k,t] = 0.0
+	    ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -100.0
          end
-         lambda = (xam_r*gamma1*xorg2*nrv/qrv)^xobmr
-         N0 = nrv*xorg2*lambda^gamma2
-         ZDR[i,j,k,t], ZV[i,j,k,t], ZA[i,j,k,t], DBZ[i,j,k,t] = calc_radar_variables(N0,lambda)
        end
      end
    end
@@ -65,7 +76,7 @@ function read_WRF()
 end
 
 
-function calc_radar_variables()
+@debug function calc_radar_variables(N0,lambda)
   # Define radar constants
   eps = 8.88 + 0.63im
   wavelength = 100
@@ -94,28 +105,36 @@ function calc_radar_variables()
   zh = 0.0
   zv = 0.0
   mu = 0
-  N0 = 8000
-  D0 = 1.5
-  lambda = (3.67 + mu)/D0
   for i in [1:16]
       D = i*0.5
       N = N0*(D^mu)*exp(-lambda*D)
       zv += abs2(s_amp[i,1])*N
       zh += abs2(s_amp[i,2])*N
-      println(D, "mm : ",N," #/m^3, H: ", zh, ", V:", zv)
+      #println(D, "mm : ",N," #/m^3, H: ", zh, ", V:", zv)
   end
   zv *= (4*wavelength^4)/(pi^4*k^2)
   zh *= (4*wavelength^4)/(pi^4*k^2)
   za = N0*gamma(xcre)/(lambda^xcre)
-
-  Zdr = 10*log10(zh/zv)
-  Zv = 10*log10(zv)
-  Zh = 10*log10(zh)
-  Za = 10*log10(za)
+#@bp
+  if (zh > 0) && (zv > 0)
+   Zdr = 10*log10(zh/zv)
+   Zv = 10*log10(zv)
+   Zh = 10*log10(zh)
+  else
+ #  println("Z less than zero: ", zv, " ", zh)
+   Zdr = 0.0
+   Zv = -35.0
+   Zh = -35.0
+  end
+  if (za > 0)
+   Za = 10*log10(za)
+  else
+   Za = -35
+  end
   return Zdr, Zv, Zh, Za
 end
 
-function read_nc_var(filename::ASCIIString,varnames::Array)
+function read_nc_var(filename,varnames::Array)
   ###Read in Cartesian nc-file
   ###Only works as intended if you read in more than 1 variable
   #println("Read in nc file ...")
@@ -128,7 +147,7 @@ function read_nc_var(filename::ASCIIString,varnames::Array)
   return collect(values(data))
 end
 
-function write_ncfile_generic(filename,x,y,z,varnames)
+@debug function write_ncfile(filename,lat,lon,eta,varnames)
   ###Write to nc-file
   ### data has to be in data["varname"]
   println("Write to nc file ...")
@@ -136,24 +155,28 @@ function write_ncfile_generic(filename,x,y,z,varnames)
   ncvars = NcVar[]
   xatts = {"long_name" => "x (longitude)", "units" => "km", "missing_value" => -999, "_FillValue" => -999}
   yatts = {"long_name" => "y (latitude)",  "units" => "km", "missing_value" => -999, "_FillValue" => -999}
-  zatts = {"long_name" => "z (altitude)",  "units" => "km", "missing_value" => -999, "_FillValue" => -999}
+  zatts = {"long_name" => "z (eta)",  "units" => "km", "missing_value" => -999, "_FillValue" => -999}
   tatts = {"long_name" => "time",  "units" => "s", "missing_value" => -999, "_FillValue" => -999}
   t = [1]
-  x_dim = NcDim("longitude",lon,xatts)
-  y_dim = NcDim("latitude",lat,yatts)
-  z_dim = NcDim("eta",eta,zatts)
-  t_dim = NcDim("t",times,tatts)
+  x_dim = NcDim("longitude",lon[:,1,1],xatts)
+  y_dim = NcDim("latitude",lat[:,1,1],yatts)
+  z_dim = NcDim("eta",eta[:,1],zatts)
+  t_dim = NcDim("t",t,tatts)
 
   for varname in varnames
     atts  = {"long_name" => varname, "units" => "???", "missing_value" => -999, "_FillValue" => -999}
     push!(ncvars,NcVar(varname,[x_dim,y_dim,z_dim,t_dim],atts,Float64))
   end
-
   nc = NetCDF.create(filename,ncvars)
 
-  for varname in varnames
-    NetCDF.putvar(nc,varname,data[varname])
-  end
+  NetCDF.putvar(nc,"refl",refl)
+  NetCDF.putvar(nc,"ZDR",ZDR)
+  NetCDF.putvar(nc,"ZV",ZV)
+  NetCDF.putvar(nc,"ZH",ZH)
+  NetCDF.putvar(nc,"DBZ",DBZ)
+  #for varname in varnames
+  #  NetCDF.putvar(nc,varname,data[varname])
+  #end
 
   NetCDF.close(nc)
   return 0
@@ -163,8 +186,57 @@ end
 args = parse_commandline()
 filein = args["input"]
 fileout = args["output"]
-read_WRF()
-vars_original = ["qrain,qnrain,qv,pb,pp,tempk,refl"]
-vars_calculated = ["ZDR,ZV,ZH,DBZ"]
+#read_WRF()
+ ### Read in cartesian analysis
+  println("Reading ",filein)
+  centerX = 0; centerY = 0 ### TC center in km (in relation to x,y arrays)  # How was this defined??
+  dims = ["XLAT","XLONG","ZNU","Times"]
+  vars = ["QRAIN","QNRAIN","QVAPOR","PB","P","T","REFL_10CM"]
+  lat,lon,eta,times = read_nc_var(filein,dims)
+  qrain,qnrain,qv,pb,pp,theta,refl = read_nc_var(filein,vars)
+  d1,d2,d3,d4 = size(qrain)
+
+  # Initialize new radar variables
+  ZDR      = similar(qrain); fill!(ZDR, -999)
+  ZV      = similar(qrain); fill!(ZV, -999)
+  ZH      = similar(qrain); fill!(ZH, -999)
+  DBZ      = similar(qrain); fill!(DBZ, -999)
+
+  println("Calculating radar variables...")
+  gamma1 = gamma(1. + xbm_r + xmu_r)
+  gamma2 = gamma(1. + xmu_r)
+  xorg2 = 1.0/gamma2
+  for t in [1:d4]
+    for k in [1:d3]
+      for j in [1:d2]
+        for i in [1:d1]
+          qvapor = max(1.0e-10,qv[i,j,k,t])
+          pressure = pb[i,j,k,t]+pp[i,j,k,t]
+          tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
+          rho = 0.622*pressure/(287.0*tempk*(qvapor+0.622))
+  #        println("PTQ: ", pressure, ", ", tempk,", ", qvapor)
+         if (qrain[i,j,k,t] > 1.0e-9) && (qnrain[i,j,k,t] > 0.0)
+            qrv = qrain[i,j,k,t]*rho
+            nrv = qnrain[i,j,k,t]*rho
+          #  println(lat[i,j,t],",",lon[i,j,t])
+          # println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
+ @bp
+          lambda = ((xam_r*gamma1*xorg2*nrv/qrv)^xobmr)/1000.0
+            N0 = nrv*xorg2*lambda^gamma2
+            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t] = calc_radar_variables(N0,lambda)
+          else
+            #qrv = 1.0e-12
+            #nrv = 1.0e-12
+            ZDR[i,j,k,t] = 0.0
+            ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -35.0
+         end
+       end
+     end
+   end
+ end
+
+vars_original = ["qrain","qnrain","qv","pb","pp","theta","refl"]
+vars_calculated = ["refl","ZDR","ZV","ZH","DBZ"]
 vars_out = [vars_original, vars_calculated]
-write_ncfile(fileout,x,y,z,vars_out)
+println("Writing ", fileout)
+write_ncfile(fileout,lat,lon,eta,vars_calculated)
