@@ -104,34 +104,38 @@ end
   # Calculate the reflectivity using 0.5 mm bins
   zh = 0.0
   zv = 0.0
-  mu = 0
+  ql = 0.0
+  mu = 0.0
   for i in [1:16]
       D = i*0.5
       N = N0*(D^mu)*exp(-lambda*D)
+      ql += xam_r*N0*(D^(3.0+mu))*exp(-lambda*D)
       zv += abs2(s_amp[i,1])*N
       zh += abs2(s_amp[i,2])*N
       #println(D, "mm : ",N," #/m^3, H: ", zh, ", V:", zv)
   end
+  ql *= 1.0e-9
   zv *= (4*wavelength^4)/(pi^4*k^2)
   zh *= (4*wavelength^4)/(pi^4*k^2)
   za = N0*gamma(xcre)/(lambda^xcre)
-#@bp
-  if (zh > 0) && (zv > 0)
+
+  if (zh > 10.0^(-3.5)) && (zv > 10.0^(-3.5))
    Zdr = 10*log10(zh/zv)
    Zv = 10*log10(zv)
    Zh = 10*log10(zh)
   else
- #  println("Z less than zero: ", zv, " ", zh)
    Zdr = 0.0
    Zv = -35.0
    Zh = -35.0
   end
-  if (za > 0)
+
+  if (za > 10.0^(-3.5))
    Za = 10*log10(za)
   else
-   Za = -35
+   Za = -35.0
   end
-  return Zdr, Zv, Zh, Za
+
+  return Zdr, Zv, Zh, Za, ql
 end
 
 function read_nc_var(filename,varnames::Array)
@@ -147,7 +151,7 @@ function read_nc_var(filename,varnames::Array)
   return collect(values(data))
 end
 
-@debug function write_ncfile(filename,lat,lon,eta,varnames)
+@debug function write_ncfile(filename,lat,lon,eta,times,varnames)
   ###Write to nc-file
   ### data has to be in data["varname"]
   println("Write to nc file ...")
@@ -174,6 +178,10 @@ end
   NetCDF.putvar(nc,"ZV",ZV)
   NetCDF.putvar(nc,"ZH",ZH)
   NetCDF.putvar(nc,"DBZ",DBZ)
+  NetCDF.putvar(nc,"Zdiff",Zdiff)
+  NetCDF.putvar(nc,"ql",ql)
+  NetCDF.putvar(nc,"qrain",qrain)
+  NetCDF.putvar(nc,"qdiff",qdiff)
   #for varname in varnames
   #  NetCDF.putvar(nc,varname,data[varname])
   #end
@@ -198,9 +206,12 @@ fileout = args["output"]
 
   # Initialize new radar variables
   ZDR      = similar(qrain); fill!(ZDR, -999)
-  ZV      = similar(qrain); fill!(ZV, -999)
-  ZH      = similar(qrain); fill!(ZH, -999)
+  ZV       = similar(qrain); fill!(ZV, -999)
+  ZH       = similar(qrain); fill!(ZH, -999)
   DBZ      = similar(qrain); fill!(DBZ, -999)
+  Zdiff    = similar(qrain); fill!(Zdiff, -999)
+  ql       = similar(qrain); fill!(ql, -999)
+  qdiff    = similar(qrain); fill!(qdiff, -999)
 
   println("Calculating radar variables...")
   gamma1 = gamma(1. + xbm_r + xmu_r)
@@ -213,30 +224,48 @@ fileout = args["output"]
           qvapor = max(1.0e-10,qv[i,j,k,t])
           pressure = pb[i,j,k,t]+pp[i,j,k,t]
           tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
-          rho = 0.622*pressure/(287.0*tempk*(qvapor+0.622))
+          rho = 0.622*pressure/(287.15*tempk*(qvapor+0.622))
   #        println("PTQ: ", pressure, ", ", tempk,", ", qvapor)
-         if (qrain[i,j,k,t] > 1.0e-9) && (qnrain[i,j,k,t] > 0.0)
+          if (qrain[i,j,k,t] > 1.0e-9) && (qnrain[i,j,k,t] > 0.0)
             qrv = qrain[i,j,k,t]*rho
             nrv = qnrain[i,j,k,t]*rho
           #  println(lat[i,j,t],",",lon[i,j,t])
           # println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
- @bp
-          lambda = ((xam_r*gamma1*xorg2*nrv/qrv)^xobmr)/1000.0
+            lambda = ((xam_r*gamma1*xorg2*nrv/qrv)^xobmr)/1000.0
+            if (lambda < 1./2800.E-3)
+              lambda = 1./2800.E-3
+            elseif (lambda > 1./20.E-3)
+              lambda = 1./20.E-3
+            end
             N0 = nrv*xorg2*lambda^gamma2
-            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t] = calc_radar_variables(N0,lambda)
+            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_variables(N0,lambda)
+            Zdiff[i,j,k,t] = DBZ[i,j,k,t] - refl[i,j,k,t]
+            if (DBZ[i,j,k,t] > 100.0)
+              println("Large Z :",DBZ[i,j,k,t])
+              println(lat[i,j,t],",",lon[i,j,t])
+              println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
+              println(N0,",",lambda)
+            elseif (DBZ[i,j,k,t] < -35.0)
+              println("Small Z :",DBZ[i,j,k,t])
+              println(lat[i,j,t],",",lon[i,j,t])
+              println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
+              println(N0,",",lambda)
+            end
           else
             #qrv = 1.0e-12
             #nrv = 1.0e-12
+            ql[i,j,k,t] = 1.0e-9
             ZDR[i,j,k,t] = 0.0
             ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -35.0
          end
+         qdiff[i,j,k,t] = ql[i,j,k,t] - qrain[i,j,k,t]
        end
      end
    end
  end
 
 vars_original = ["qrain","qnrain","qv","pb","pp","theta","refl"]
-vars_calculated = ["refl","ZDR","ZV","ZH","DBZ"]
+vars_calculated = ["refl","ZDR","ZV","ZH","DBZ","Zdiff","ql","qrain","qdiff"]
 vars_out = [vars_original, vars_calculated]
 println("Writing ", fileout)
-write_ncfile(fileout,lat,lon,eta,vars_calculated)
+write_ncfile(fileout,lat,lon,eta,times,vars_calculated)
