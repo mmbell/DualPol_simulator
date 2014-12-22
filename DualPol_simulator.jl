@@ -26,57 +26,7 @@ function parse_commandline()
   return parse_args(s)
 end
 
-function read_WRF()
-  ### Read in cartesian analysis
-  println("Reading ",filein)
-  centerX = 0; centerY = 0 ### TC center in km (in relation to x,y arrays)  # How was this defined??
-  #dims = ["XLAT","XLONG","ZNU"]
-  dims = ["south_north","east_west","bottom_top"]
-  vars = ["QRAIN","QNRAIN","QVAPOR","PB","P","T","REFL_10CM"]
-  lat,lon,eta = read_nc_var(filein,dims)
-  qrain,qnrain,qv,pb,pp,theta,refl = read_nc_var(filein,vars)
-  d1,d2,d3,d4 = size(qrain)
-
-  # Initialize new radar variables
-  ZDR      = similar(qrain); fill!(ZDR, -999)
-  ZV      = similar(qrain); fill!(ZV, -999)
-  ZH      = similar(qrain); fill!(ZH, -999)
-  DBZ      = similar(qrain); fill!(DBZ, -999)
-
-  println("Calculating radar variables...")
-  gamma1 = gamma(1. + xbm_r + xmu_r)
-  gamma2 = gamma(1. + xmu_r)
-  xorg2 = 1.0/gamma2
-  for t in [1:d4]
-    for k in [1:d3]
-      for j in [1:d2]
-        for i in [1:d1]
-	  qvapor = max(1.0e-10,qv[i,j,k,t])
-          pressure = pb[i,j,k,t]+pp[i,j,k,t]
-          tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
-          rho = 0.622*pressure/(287.0*tempk*(qvapor+0.622))
-  #        println("PTQ: ", pressure, ", ", tempk,", ", qvapor)
-         if (qrain[i,j,k,t] > 1.0e-9) && (qnrain[i,j,k,t] > 0.0)
-            qrv = qrain[i,j,k,t]*rho
-            nrv = qnrain[i,j,k,t]*rho
- #	    println("L: ", nrv, " ", qrv, " ", rho)
-          lambda = (xam_r*gamma1*xorg2*nrv/qrv)^xobmr
-            N0 = nrv*xorg2*lambda^gamma2
-            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t] = calc_radar_variables(N0,lambda)
-          else
-            #qrv = 1.0e-12
-            #nrv = 1.0e-12
-	    ZDR[i,j,k,t] = 0.0
-	    ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -100.0
-         end
-       end
-     end
-   end
- end
-end
-
-
-@debug function calc_radar_variables(N0,lambda)
+function calc_radar_variables(N0,lambda)
   # Define radar constants
   eps = 8.88 + 0.63im
   wavelength = 100
@@ -105,11 +55,9 @@ end
   # Calculate the reflectivity using 0.5 mm bins
   zh = 0.0
   zv = 0.0
-  #zt = 0.0
   ql = 0.0
   mu = 0.0
   h = 8.0/48.0
-  #Rayleigh = (pi^2)*k/(2*100^2)
   for i in [1:17]
     if (i == 1) || (i == 17)
       intcoeff = 1.0
@@ -123,13 +71,10 @@ end
       ql += xam_r*N0*(D^(3.0+mu))*exp(-lambda*D)*intcoeff
       zv += abs2(s_amp[i,1])*N*intcoeff
       zh += abs2(s_amp[i,2])*N*intcoeff
-      #zt += (Rayleigh*D^3.0)^2*N*intcoeff
-      #println(D, "mm : ",N," #/m^3, H: ", zh, ", V:", zv)
   end
   ql *= h*1.0e-9
   zv *= h*(4*wavelength^4)/(pi^4*k^2)
   zh *= h*(4*wavelength^4)/(pi^4*k^2)
-  #zt *= h*(4*wavelength^4)/(pi^4*k^2)
   za = N0*gamma(xcre)/(lambda^xcre)
 
   if (zh > 10.0^(-3.5)) && (zv > 10.0^(-3.5))
@@ -144,10 +89,8 @@ end
 
   if (za > 10.0^(-3.5))
    Za = 10*log10(za)
-   #Zt = 10*log10(zt)
   else
    Za = -35.0
-   #Zt = -35.0
   end
 
   return Zdr, Zv, Zh, Za, ql
@@ -168,39 +111,44 @@ end
 
 @debug function write_ncfile(filename,lat,lon,eta,times,varnames)
   ###Write to nc-file
-  ### data has to be in data["varname"]
   println("Write to nc file ...")
 
   ncvars = NcVar[]
-  xatts = {"long_name" => "x (longitude)", "units" => "km", "missing_value" => -999, "_FillValue" => -999}
-  yatts = {"long_name" => "y (latitude)",  "units" => "km", "missing_value" => -999, "_FillValue" => -999}
-  zatts = {"long_name" => "z (eta)",  "units" => "km", "missing_value" => -999, "_FillValue" => -999}
-  tatts = {"long_name" => "time",  "units" => "s", "missing_value" => -999, "_FillValue" => -999}
-  t = [1]
-  x_dim = NcDim("longitude",lon[:,1,1],xatts)
-  y_dim = NcDim("latitude",lat[:,1,1],yatts)
-  z_dim = NcDim("eta",eta[:,1],zatts)
-  t_dim = NcDim("t",t,tatts)
+  xatts = {"long_name" => "x (longitude)", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  yatts = {"long_name" => "y (latitude)",  "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  zatts = {"long_name" => "z (eta)",  "units" => "unitless", "missing_value" => -999, "_FillValue" => -999}
+  tatts = {"long_name" => "time (minutes)",  "units" => "min", "missing_value" => -999, "_FillValue" => -999}
+  x_dim = NcDim("east_west",lon[:,1,1],xatts)
+  y_dim = NcDim("south_north",lat[:,1,1],yatts)
+  z_dim = NcDim("bottom_top",eta[:,1],zatts)
+  t_dim = NcDim("Time",times,tatts)
 
   for varname in varnames
     atts  = {"long_name" => varname, "units" => "???", "missing_value" => -999, "_FillValue" => -999}
     push!(ncvars,NcVar(varname,[x_dim,y_dim,z_dim,t_dim],atts,Float64))
   end
+  atts  = {"long_name" => "Latitude", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  push!(ncvars,NcVar("XLAT",[x_dim,y_dim,t_dim],atts,Float64))
+  atts  = {"long_name" => "Longitude", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  push!(ncvars,NcVar("XLON",[x_dim,y_dim,t_dim],atts,Float64))
+  atts  = {"long_name" => "Time", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  push!(ncvars,NcVar("XTIME",[t_dim],atts,Float64))
+  atts  = {"long_name" => "Eta Levels", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  push!(ncvars,NcVar("ZNU",[z_dim,t_dim],atts,Float64))
   nc = NetCDF.create(filename,ncvars)
 
   NetCDF.putvar(nc,"REFL_10CM",refl)
   NetCDF.putvar(nc,"ZDR",ZDR)
   NetCDF.putvar(nc,"ZV",ZV)
   NetCDF.putvar(nc,"ZH",ZH)
-  NetCDF.putvar(nc,"DBZ",DBZ)
+  NetCDF.putvar(nc,"Rayleigh",DBZ)
   NetCDF.putvar(nc,"Zdiff",Zdiff)
-  NetCDF.putvar(nc,"qr",ql)
   NetCDF.putvar(nc,"QRAIN",qrain)
   NetCDF.putvar(nc,"QNRAIN",qnrain)
-  NetCDF.putvar(nc,"qdiff",qdiff)
-  #for varname in varnames
-  #  NetCDF.putvar(nc,varname,data[varname])
-  #end
+  NetCDF.putvar(nc,"XLAT",lat)
+  NetCDF.putvar(nc,"XLON",lon)
+  NetCDF.putvar(nc,"XTIME",times)
+  NetCDF.putvar(nc,"ZNU",eta)
 
   NetCDF.close(nc)
   return 0
@@ -213,8 +161,7 @@ fileout = args["output"]
 #read_WRF()
  ### Read in cartesian analysis
   println("Reading ",filein)
-  centerX = 0; centerY = 0 ### TC center in km (in relation to x,y arrays)  # How was this defined??
-  dims = ["XLAT","XLONG","ZNU","Times"]
+  dims = ["XLAT","XLONG","ZNU","XTIME"]
   vars = ["QRAIN","QNRAIN","QVAPOR","PB","P","T","REFL_10CM"]
   lat,lon,eta,times = read_nc_var(filein,dims)
   qrain,qnrain,qv,pb,pp,theta,refl = read_nc_var(filein,vars)
@@ -241,12 +188,9 @@ fileout = args["output"]
           pressure = pb[i,j,k,t]+pp[i,j,k,t]
           tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
           rho = 0.622*pressure/(287.15*tempk*(qvapor+0.622))
-  #        println("PTQ: ", pressure, ", ", tempk,", ", qvapor)
           if (qrain[i,j,k,t] > 1.0e-9) && (qnrain[i,j,k,t] > 0.0)
             qrv = qrain[i,j,k,t]*rho
             nrv = qnrain[i,j,k,t]*rho
-          #  println(lat[i,j,t],",",lon[i,j,t])
-          # println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
             lambda = ((xam_r*gamma1*xorg2*nrv/qrv)^xobmr)/1000.0
             if (lambda < 1./2800.E-3)
               lambda = 1./2800.E-3
@@ -271,7 +215,8 @@ fileout = args["output"]
           else
             qrv = 1.0e-12
             nrv = 1.0e-12
-            ql[i,j,k,t] = 1.0e-12
+            ql[i,j,k,t] = 1.0e-9
+            qrain[i,j,k,t] = 1.0e-9
             ZDR[i,j,k,t] = 0.0
             ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -35.0
          end
@@ -281,8 +226,6 @@ fileout = args["output"]
    end
  end
 
-vars_original = ["qrain","qnrain","qv","pb","pp","theta","refl"]
-vars_calculated = ["REFL_10CM","ZDR","ZV","ZH","DBZ","Zdiff","qr","QRAIN","QNRAIN","qdiff"]
-vars_out = [vars_original, vars_calculated]
+vars_out = ["REFL_10CM","ZDR","ZV","ZH","Rayleigh","Zdiff","QRAIN","QNRAIN"]
 println("Writing ", fileout)
-write_ncfile(fileout,lat,lon,eta,times,vars_calculated)
+write_ncfile(fileout,lat,lon,eta,times,vars_out)
