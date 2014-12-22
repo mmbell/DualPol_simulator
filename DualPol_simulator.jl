@@ -99,24 +99,37 @@ end
             [8.03320e-02+(-2.25460e-03)im] [-1.34920e-01+(4.44170e-03)im]
             [9.40660e-02+(-3.67760e-03)im] [-1.62650e-01+(8.75570e-03)im]
             [1.07580e-01+(-5.84290e-03)im] [-1.88770e-01+(1.73100e-02)im]
-            [1.20010e-01+(-9.05960e-03)im] [-2.08160e-01+(3.50790e-02)im] ];
+            [1.20010e-01+(-9.05960e-03)im] [-2.08160e-01+(3.50790e-02)im]
+            [0.0+(0.0)im] [0.0+(0.0)im] ];
 
   # Calculate the reflectivity using 0.5 mm bins
   zh = 0.0
   zv = 0.0
+  #zt = 0.0
   ql = 0.0
   mu = 0.0
-  for i in [1:16]
+  h = 8.0/48.0
+  #Rayleigh = (pi^2)*k/(2*100^2)
+  for i in [1:17]
+    if (i == 1) || (i == 17)
+      intcoeff = 1.0
+    elseif (i%2 == 0)
+      intcoeff = 4.0
+    else
+      intcoeff = 2.0
+    end
       D = i*0.5
       N = N0*(D^mu)*exp(-lambda*D)
-      ql += xam_r*N0*(D^(3.0+mu))*exp(-lambda*D)
-      zv += abs2(s_amp[i,1])*N
-      zh += abs2(s_amp[i,2])*N
+      ql += xam_r*N0*(D^(3.0+mu))*exp(-lambda*D)*intcoeff
+      zv += abs2(s_amp[i,1])*N*intcoeff
+      zh += abs2(s_amp[i,2])*N*intcoeff
+      #zt += (Rayleigh*D^3.0)^2*N*intcoeff
       #println(D, "mm : ",N," #/m^3, H: ", zh, ", V:", zv)
   end
-  ql *= 1.0e-9
-  zv *= (4*wavelength^4)/(pi^4*k^2)
-  zh *= (4*wavelength^4)/(pi^4*k^2)
+  ql *= h*1.0e-9
+  zv *= h*(4*wavelength^4)/(pi^4*k^2)
+  zh *= h*(4*wavelength^4)/(pi^4*k^2)
+  #zt *= h*(4*wavelength^4)/(pi^4*k^2)
   za = N0*gamma(xcre)/(lambda^xcre)
 
   if (zh > 10.0^(-3.5)) && (zv > 10.0^(-3.5))
@@ -131,8 +144,10 @@ end
 
   if (za > 10.0^(-3.5))
    Za = 10*log10(za)
+   #Zt = 10*log10(zt)
   else
    Za = -35.0
+   #Zt = -35.0
   end
 
   return Zdr, Zv, Zh, Za, ql
@@ -173,14 +188,15 @@ end
   end
   nc = NetCDF.create(filename,ncvars)
 
-  NetCDF.putvar(nc,"refl",refl)
+  NetCDF.putvar(nc,"REFL_10CM",refl)
   NetCDF.putvar(nc,"ZDR",ZDR)
   NetCDF.putvar(nc,"ZV",ZV)
   NetCDF.putvar(nc,"ZH",ZH)
   NetCDF.putvar(nc,"DBZ",DBZ)
   NetCDF.putvar(nc,"Zdiff",Zdiff)
-  NetCDF.putvar(nc,"ql",ql)
-  NetCDF.putvar(nc,"qrain",qrain)
+  NetCDF.putvar(nc,"qr",ql)
+  NetCDF.putvar(nc,"QRAIN",qrain)
+  NetCDF.putvar(nc,"QNRAIN",qnrain)
   NetCDF.putvar(nc,"qdiff",qdiff)
   #for varname in varnames
   #  NetCDF.putvar(nc,varname,data[varname])
@@ -237,9 +253,10 @@ fileout = args["output"]
             elseif (lambda > 1./20.E-3)
               lambda = 1./20.E-3
             end
-            N0 = nrv*xorg2*lambda^gamma2
+            N0 = nrv*xorg2*lambda^(1. + xmu_r)
             ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_variables(N0,lambda)
-            Zdiff[i,j,k,t] = DBZ[i,j,k,t] - refl[i,j,k,t]
+            Zdiff[i,j,k,t] = DBZ[i,j,k,t] - ZV[i,j,k,t]
+            ql[i,j,k,t] = 1.e-9*xam_r*N0*gamma1/(rho*lambda^(1. + xbm_r + xmu_r))
             if (DBZ[i,j,k,t] > 100.0)
               println("Large Z :",DBZ[i,j,k,t])
               println(lat[i,j,t],",",lon[i,j,t])
@@ -252,20 +269,20 @@ fileout = args["output"]
               println(N0,",",lambda)
             end
           else
-            #qrv = 1.0e-12
-            #nrv = 1.0e-12
-            ql[i,j,k,t] = 1.0e-9
+            qrv = 1.0e-12
+            nrv = 1.0e-12
+            ql[i,j,k,t] = 1.0e-12
             ZDR[i,j,k,t] = 0.0
             ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -35.0
          end
-         qdiff[i,j,k,t] = ql[i,j,k,t] - qrain[i,j,k,t]
+         qdiff[i,j,k,t] = ql[i,j,k,t] / qrain[i,j,k,t]
        end
      end
    end
  end
 
 vars_original = ["qrain","qnrain","qv","pb","pp","theta","refl"]
-vars_calculated = ["refl","ZDR","ZV","ZH","DBZ","Zdiff","ql","qrain","qdiff"]
+vars_calculated = ["REFL_10CM","ZDR","ZV","ZH","DBZ","Zdiff","qr","QRAIN","QNRAIN","qdiff"]
 vars_out = [vars_original, vars_calculated]
 println("Writing ", fileout)
 write_ncfile(fileout,lat,lon,eta,times,vars_calculated)
