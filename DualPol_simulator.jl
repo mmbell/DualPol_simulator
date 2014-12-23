@@ -118,10 +118,10 @@ end
   yatts = {"long_name" => "y (latitude)",  "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
   zatts = {"long_name" => "z (eta)",  "units" => "unitless", "missing_value" => -999, "_FillValue" => -999}
   tatts = {"long_name" => "time (minutes)",  "units" => "min", "missing_value" => -999, "_FillValue" => -999}
-  x_dim = NcDim("east_west",lon[:,1,1],xatts)
-  y_dim = NcDim("south_north",lat[:,1,1],yatts)
-  z_dim = NcDim("bottom_top",eta[:,1],zatts)
-  t_dim = NcDim("Time",times,tatts)
+  x_dim = NcDim("east_west",[1:length(lon[:,1,1])],xatts)
+  y_dim = NcDim("south_north",[1:length(lat[:,1,1])],yatts)
+  z_dim = NcDim("bottom_top",[1:length(eta[:,1])],zatts)
+  t_dim = NcDim("Time",[1:length(times)],tatts)
 
   for varname in varnames
     atts  = {"long_name" => varname, "units" => "???", "missing_value" => -999, "_FillValue" => -999}
