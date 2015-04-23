@@ -12,11 +12,11 @@ xcre = 1. + 2.*xbm_r + xmu_r
 
 # Angular moments from Jung et al (2010,JAMC) Eqns (4)
 # canting angle distribution width (sigma) equal 10 degrees only for rain & oblate crystals
-sig = degrees2radians(10.0)
-r = exp(-2*sig^2)
-A = ( 3/8 + (1/2)*r + (1/8)*r^4 )
-B = ( 3/8 - (1/2)*r + (1/8)*r^4 )
-C = (1/8)*( 1 - r^4 )
+sig = deg2rad(10.0)
+r = exp(-2.0*sig*sig)
+A = ( 0.375 + (0.5)*r + (0.125)*r^4 )
+B = ( 0.375 - (0.5)*r + (0.125)*r^4 )
+C = (0.125)*( 1 - r^4 )
 
 function parse_commandline()
   s = ArgParseSettings()
@@ -66,7 +66,7 @@ function calc_radar_variables(N0,lambda)
   ql = 0.0
   mu = 0.0
   h = 8.0/48.0
-  
+
   for i in [1:17]
     if (i == 1) || (i == 17)
       intcoeff = 1.0
@@ -79,8 +79,8 @@ function calc_radar_variables(N0,lambda)
       N = N0*(D^mu)*exp(-lambda*D)
       ql += xam_r*N0*(D^(3.0+mu))*exp(-lambda*D)*intcoeff
       # Jung et al (2010,JAMC) Eqns (4) and (3)
-      zv += ( B*abs2(s_amp[i,2]) + A*abs2(s_amp[i,1]) + 2*C*real( conj(s_amp[i,1])*s_amp[i,2] ) )*N*intcoeff      
-      zh += ( A*abs2(s_amp[i,2]) + B*abs2(s_amp[i,1]) + 2*C*real( conj(s_amp[i,1])*s_amp[i,2] ) )*N*intcoeff  
+      zv += ( B*abs2(s_amp[i,2]) + A*abs2(s_amp[i,1]) + 2*C*real( conj(s_amp[i,1])*s_amp[i,2] ) )*N*intcoeff
+      zh += ( A*abs2(s_amp[i,2]) + B*abs2(s_amp[i,1]) + 2*C*real( conj(s_amp[i,1])*s_amp[i,2] ) )*N*intcoeff
    end
   ql *= h*1.0e-9
   zv *= h*(4*wavelength^4)/(pi^4*k^2)

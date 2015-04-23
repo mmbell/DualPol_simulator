@@ -13,11 +13,11 @@ xcre = 1. + 2.*xbm_r + xmu_r
 # Angular moments from Ryzhkov et al (2011,JAMC) Eqns (20)
 # canting angle distribution width (sigma) equal 10 degrees only for rain & oblate crystals
 sig = deg2rad(10.0)
-r = exp(-2*sig^2)
-A1 = (1/4)*(1+r)^2
-A2 = (1/4)*(1-r^2)
-A3 = ( 3/8 + (1/2)*r + (1/8)*r^4 )^2
-A4 = ( 3/8 - (1/2)*r + (1/8)*r^4 )*( 3/8 + (1/2)*r + (1/8)*r^4 )
+r = exp(-2.0*sig^2)
+A1 = (1.0/4.0)*(1.0+r)*(1.0+r)
+A2 = (1.0/4.0)*(1.0-r)*(1.0-r)
+A3 = ( 3.0/8.0 + (1.0/2.0)*r + (1.0/8.0)*r^4 )^2
+A4 = ( 3.0/8.0 - (1.0/2.0)*r + (1.0/8.0)*r^4 )*( 3.0/8.0 + (1.0/2.0)*r + (1.0/8.0)*r^4 )
 
 function parse_commandline()
   s = ArgParseSettings()
@@ -26,7 +26,7 @@ function parse_commandline()
     "--output","-o"
     help = "path to output file"
     arg_type = String
-    default = "dualpol_radar_ryzhkov.nc"
+    default = "dualpol_radar.nc"
     "input"
     help = "path to input file"
     arg_type = String
@@ -67,7 +67,7 @@ function calc_radar_variables(N0,lambda)
   ql = 0.0
   mu = 0.0
   h = 8.0/48.0
-  
+
   for i in [1:17]
     if (i == 1) || (i == 17)
       intcoeff = 1.0
@@ -80,9 +80,9 @@ function calc_radar_variables(N0,lambda)
       N = N0*(D^mu)*exp(-lambda*D)
       ql += xam_r*N0*(D^(3.0+mu))*exp(-lambda*D)*intcoeff
       # Ryzhkov et al (2011, JAMC) Eqns. (29)
-      zv += ( abs2(s_amp[i,1]) - 2*real( conj(s_amp[i,2])*(s_amp[i,2] - s_amp[i,1]) )*A1 + abs2( s_amp[i,2] - s_amp[i,1] )*A3 )*N*intcoeff      
-      zh += ( abs2(s_amp[i,2]) - 2*real( conj(s_amp[i,2])*(s_amp[i,2] - s_amp[i,1]) )*A2 + abs2( s_amp[i,2] - s_amp[i,1] )*A4 )*N*intcoeff  
-   end
+      zv += ( abs2(s_amp[i,1]) - 2*real( conj(s_amp[i,2])*(s_amp[i,2] - s_amp[i,1]) )*A1 + abs2( s_amp[i,2] - s_amp[i,1])*A3 )*N*intcoeff
+      zh += ( abs2(s_amp[i,2]) - 2*real( conj(s_amp[i,2])*(s_amp[i,2] - s_amp[i,1]) )*A2 + abs2( s_amp[i,2] - s_amp[i,1])*A4 )*N*intcoeff
+    end
   ql *= h*1.0e-9
   zv *= h*(4*wavelength^4)/(pi^4*k^2)
   zh *= h*(4*wavelength^4)/(pi^4*k^2)
