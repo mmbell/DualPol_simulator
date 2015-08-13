@@ -22,14 +22,10 @@ function parse_commandline()
   s = ArgParseSettings()
 
   @add_arg_table s begin
-    "--dsdtype","-d"
-    help = "single, double, full"
-    arg_type = String
-    required = true
     "--output","-o"
     help = "path to output file"
     arg_type = String
-    default = "dualpol_radar.nc"
+    default = "dualpol_radar_jung.nc"
     "input"
     help = "path to input file"
     arg_type = String
@@ -38,7 +34,7 @@ function parse_commandline()
   return parse_args(s)
 end
 
-function calc_radar_exponentialdsd(N0,lambda)
+function calc_radar_variables(N0,lambda)
   # Define radar constants
   eps = 8.88 + 0.63im
   wavelength = 100
@@ -64,7 +60,7 @@ function calc_radar_exponentialdsd(N0,lambda)
             [1.20010e-01+(-9.05960e-03)im] [-2.08160e-01+(3.50790e-02)im]
             [0.0+(0.0)im] [0.0+(0.0)im] ];
 
-  # Calculate the reflectivity using 0.5 mm bins
+  # Calculate the reflectivity using equal mass bins
   zh = 0.0
   zv = 0.0
   ql = 0.0
@@ -215,6 +211,7 @@ function calc_radar_fulldsd(dsd, flag, qrv, N0,lambda)
   return Zdr, Zv, Zh, Za, ql
 end
 
+
 function read_nc_var(filename,varnames::Array)
   ###Read in Cartesian nc-file
   ###Only works as intended if you read in more than 1 variable
@@ -228,7 +225,7 @@ function read_nc_var(filename,varnames::Array)
   return collect(values(data))
 end
 
-@debug function write_ncfile(filename,lat,lon,lev,times,varnames)
+@debug function write_ncfile(filename,lat,lon,eta,times,varnames)
   ###Write to nc-file
   println("Write to nc file ...")
 
@@ -239,7 +236,7 @@ end
   tatts = {"long_name" => "time (minutes)",  "units" => "min", "missing_value" => -999, "_FillValue" => -999}
   x_dim = NcDim("east_west",[1:length(lon[:,1,1])],xatts)
   y_dim = NcDim("south_north",[1:length(lat[:,1,1])],yatts)
-  z_dim = NcDim("bottom_top",[1:length(lev[:,1])],zatts)
+  z_dim = NcDim("bottom_top",[1:length(eta[:,1])],zatts)
   t_dim = NcDim("Time",[1:length(times)],tatts)
 
   for varname in varnames
@@ -267,7 +264,7 @@ end
   NetCDF.putvar(nc,"XLAT",lat)
   NetCDF.putvar(nc,"XLON",lon)
   NetCDF.putvar(nc,"XTIME",times)
-  NetCDF.putvar(nc,"ZNU",lev)
+  NetCDF.putvar(nc,"ZNU",eta)
 
   NetCDF.close(nc)
   return 0
@@ -277,25 +274,10 @@ end
 args = parse_commandline()
 filein = args["input"]
 fileout = args["output"]
-dsdtype = args["dsdtype"]
-
-### Read in cartesian analysis
-println("Reading ",filein)
-fileinfo = ncinfo(filein)
-
-dims = ["XLAT","XLONG","ZNU","XTIME"]
-lat,lon,lev,times = read_nc_var(filein,dims)
-
-if (dsdtype == "single")
-  # Single moment
-  vars = ["QRAIN","QVAPOR","PB","P","T","REFL_10CM"]
-  qrain,qv,pb,pp,theta,refl = read_nc_var(filein,vars)
-elseif (dsdtype == "double")
-  # Double moment
-  vars = ["QRAIN","QNRAIN","QVAPOR","PB","P","T","REFL_10CM"]
-  qrain,qnrain,qv,pb,pp,theta,refl = read_nc_var(filein,vars)
-elseif (dsdtype == "full")
-  # Spectral bin
+#read_WRF()
+ ### Read in cartesian analysis
+  println("Reading ",filein)
+  dims = ["XLAT","XLONG","ZNU","XTIME"]
   vars = ["QRAIN","QNRAIN","QVAPOR","PB","P","T","REFL_10CM",
   "ff1i01","ff1i02","ff1i03","ff1i04","ff1i05","ff1i06","ff1i07","ff1i08",
   "ff1i09","ff1i10","ff1i11","ff1i12","ff1i13","ff1i14","ff1i15","ff1i16",
@@ -307,110 +289,87 @@ elseif (dsdtype == "full")
   for d in [1:33]
     ff1[d] = similar(dummyvar); fill!(ff1[d], -999)
   end
+
+  lat,lon,eta,times = read_nc_var(filein,dims)
   ( qrain,qnrain,qv,pb,pp,theta,refl,
   ff1[1],ff1[2],ff1[3],ff1[4],ff1[5],ff1[6],ff1[7],ff1[8],
   ff1[9],ff1[10],ff1[11],ff1[12],ff1[13],ff1[14],ff1[15],ff1[16],
   ff1[17],ff1[18],ff1[19],ff1[20],ff1[21],ff1[22],ff1[23],ff1[24],
   ff1[25],ff1[26],ff1[27],ff1[28],ff1[29],ff1[30],ff1[31],ff1[32],ff1[33] ) = read_nc_var(filein,vars)
-else
-  println(dsdtype, " not recognized")
-  exit
-end
+  d1,d2,d3,d4 = size(qrain)
 
-d1,d2,d3,d4 = size(qrain)
-
-# Initialize new radar variables
-ZDR      = similar(qrain); fill!(ZDR, -999)
-ZV       = similar(qrain); fill!(ZV, -999)
-ZH       = similar(qrain); fill!(ZH, -999)
-DBZ      = similar(qrain); fill!(DBZ, -999)
-Zdiff    = similar(qrain); fill!(Zdiff, -999)
-ql       = similar(qrain); fill!(ql, -999)
-qdiff    = similar(qrain); fill!(qdiff, -999)
-if (dsdtype == "single")
-  qnrain = similar(qrain); fill!(qnrain, -999)
-elseif (dsdtype == "full")
+  # Initialize new radar variables
+  ZDR      = similar(qrain); fill!(ZDR, -999)
+  ZV       = similar(qrain); fill!(ZV, -999)
+  ZH       = similar(qrain); fill!(ZH, -999)
+  DBZ      = similar(qrain); fill!(DBZ, -999)
+  Zdiff    = similar(qrain); fill!(Zdiff, -999)
+  ql       = similar(qrain); fill!(ql, -999)
+  qdiff    = similar(qrain); fill!(qdiff, -999)
   dsd = Array(Float32,33)
-end
 
-println("Calculating radar variables...")
-gamma1 = gamma(1. + xbm_r + xmu_r)
-gamma2 = gamma(1. + xmu_r)
-xorg2 = 1.0/gamma2
-for t in [1:d4]
-  for k in [1:d3]
-    for j in [1:d2]
-      for i in [1:d1]
-        qvapor = max(1.0e-10,qv[i,j,k,t])
-        pressure = pb[i,j,k,t]+pp[i,j,k,t]
-        tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
-        rho = 0.622*pressure/(287.15*tempk*(qvapor+0.622))
-        if (qrain[i,j,k,t] > 1.0e-9)
-          qrv = qrain[i,j,k,t]*rho
-          if (dsdtype == "single")
-            N0 = 8000
-            lambda = ((xam_r*gamma1*N0*1000.0/qrv)^(1./(1. + xbm_r)))/1000.0
-            qnrain[i,j,k,t] = N0*gamma2/(lambda^(1. + xmu_r))
-          else
-            if (qnrain[i,j,k,t] > 0.0)
-              nrv = qnrain[i,j,k,t]*rho
-              lambda = ((xam_r*gamma1*xorg2*nrv/qrv)^xobmr)/1000.0
-            else
-              nrv = 0.0
+  println("Calculating radar variables...")
+  gamma1 = gamma(1. + xbm_r + xmu_r)
+  gamma2 = gamma(1. + xmu_r)
+  xorg2 = 1.0/gamma2
+  for t in [1:d4]
+    for k in [1:d3]
+      for j in [1:d2]
+        for i in [1:d1]
+          qvapor = max(1.0e-10,qv[i,j,k,t])
+          pressure = pb[i,j,k,t]+pp[i,j,k,t]
+          tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
+          rho = 0.622*pressure/(287.15*tempk*(qvapor+0.622))
+          if (qrain[i,j,k,t] > 1.0e-9) && (qnrain[i,j,k,t] > 0.0)
+            qrv = qrain[i,j,k,t]*rho
+            nrv = qnrain[i,j,k,t]*rho
+            lambda = ((xam_r*gamma1*xorg2*nrv/qrv)^xobmr)/1000.0
+            if (lambda < 1./2800.E-3)
+              lambda = 1./2800.E-3
+            elseif (lambda > 1./20.E-3)
               lambda = 1./20.E-3
             end
-          end
-          if (lambda < 1./2800.E-3)
-            lambda = 1./2800.E-3
-          elseif (lambda > 1./20.E-3)
-            lambda = 1./20.E-3
-          end
-          if (dsdtype == "single")
-            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_exponentialdsd(N0,lambda)
-          elseif (dsdtype == "double")
+            for d in [1:33]
+              dsd[d] = ff1[d][i,j,k,t]*rho
+            end
             N0 = nrv*xorg2*lambda^(1. + xmu_r)
-            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_exponentialdsd(N0,lambda)
-          else
+            #ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_variables(N0,lambda)
             if (i == 215 && j == 200 && k == 10 && t == 3)
               flag = true
               println("Found it!")
             else
               flag = false
             end
-            for d in [1:33]
-              dsd[d] = ff1[d][i,j,k,t]*rho
-            end
-            N0 = nrv*xorg2*lambda^(1. + xmu_r)
-            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_fulldsd(dsd, flag, qrv, N0, lambda)
-          end
-
-          Zdiff[i,j,k,t] = refl[i,j,k,t] - ZH[i,j,k,t]
-          ql[i,j,k,t] = 1.e-9*xam_r*N0*gamma1/(rho*lambda^(1. + xbm_r + xmu_r))
-          if (DBZ[i,j,k,t] > 100.0)
-            println("Large Z :",DBZ[i,j,k,t])
-            println(lat[i,j,t],",",lon[i,j,t])
-            println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
-            println(N0,",",lambda)
-          elseif (DBZ[i,j,k,t] < -35.0)
-            println("Small Z :",DBZ[i,j,k,t])
-            println(lat[i,j,t],",",lon[i,j,t])
-            println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
-            println(N0,",",lambda)
-          end
-        else
-          qrv = 1.0e-12
-          nrv = 1.0e-12
-          ql[i,j,k,t] = 1.0e-9
-          qrain[i,j,k,t] = 1.0e-9
-          ZDR[i,j,k,t] = 0.0
-          ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -35.0
+            #if (flag)
+              ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_fulldsd(dsd, flag, qrv, N0, lambda)
+            #end
+            Zdiff[i,j,k,t] = refl[i,j,k,t] - ZH[i,j,k,t]
+            #ql[i,j,k,t] = 1.e-9*xam_r*N0*gamma1/(rho*lambda^(1. + xbm_r + xmu_r))
+            #if (DBZ[i,j,k,t] > 100.0)
+            #  println("Large Z :",DBZ[i,j,k,t])
+            #  println(lat[i,j,t],",",lon[i,j,t])
+            #  println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
+            #  println(N0,",",lambda)
+            #elseif (DBZ[i,j,k,t] < -35.0)
+            #  println("Small Z :",DBZ[i,j,k,t])
+            #  println(lat[i,j,t],",",lon[i,j,t])
+            #  println(i,",",j,",",k,":",nrv, " ", qrv, " ", rho, " ", refl[i,j,k,t])
+            #  println(N0,",",lambda)
+            #end
+          else
+            qrv = 1.0e-12
+            nrv = 1.0e-12
+            ql[i,j,k,t] = 1.0e-9
+            qrain[i,j,k,t] = 1.0e-9
+            ZDR[i,j,k,t] = 0.0
+            ZV[i,j,k,t] = ZH[i,j,k,t] = DBZ[i,j,k,t] = -35.0
+         end
+         qdiff[i,j,k,t] = ql[i,j,k,t] / qrain[i,j,k,t]
        end
-       qdiff[i,j,k,t] = ql[i,j,k,t] / qrain[i,j,k,t]
      end
    end
  end
-end
 
 vars_out = ["REFL_10CM","ZDR","ZV","ZH","Rayleigh","Zdiff","QRAIN","QNRAIN"]
 println("Writing ", fileout)
-write_ncfile(fileout,lat,lon,lev,times,vars_out)
+write_ncfile(fileout,lat,lon,eta,times,vars_out)
