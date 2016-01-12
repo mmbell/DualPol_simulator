@@ -1,4 +1,4 @@
-# DualPol_simulator
+# DualPol Simulator
 
 ## A dual-polarization radar simulator
 
@@ -9,6 +9,7 @@ Brown, B. R., M. M. Bell, and A. J. Frambach, 2016: "Validation of Simulated Hur
 Inputs:
  + Type of DSD (single, double, or full)
  + Name of WRF output file
+
 Outputs:
  + NetCDF file with polarimetric radar variables
 
