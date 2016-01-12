@@ -1,3 +1,29 @@
+# DualPol_simulator.jl
+#
+# A dual-polarization radar simulator
+#
+# By Michael M. Bell
+# Copyright 2015
+#
+# This program will simulate the backscatter from
+# weather targets using a single, double, or fully
+# explicit bin dropsize distribution. It is currently
+# configured to work with WRF output, and was used in
+# Brown, B. R., M. M. Bell, and A. J. Frambach, 2016:
+# "Validation of Simulated Hurricane Drop Size Distributions
+# using Polarimetric Radar", Geophys. Res. Lett., 42,
+# doi:10.1002/2015GL067278.
+#
+# Inputs: Type of DSD (single, double, or full)
+#         Name of WRF output file
+# Outputs: NetCDF file with polarimetric radar variables
+#
+# Current output is radar reflectivity factor at horizontal
+# and vertical polarization, and differential reflectivity
+# for raindrops only. Additional variables and hydrometeor
+# species will be added in due course
+#
+
 using ArgParse
 using NetCDF
 using DataStructures
@@ -11,13 +37,14 @@ xobmr = 1.0/xbm_r
 xcre = 1. + 2.*xbm_r + xmu_r
 
 # Angular moments from Jung et al (2010,JAMC) Eqns (4)
-# canting angle distribution width (sigma) equal 10 degrees only for rain & oblate crystals
+# Canting angle distribution width (sigma) equal 10 degrees only for rain & oblate crystals
 sig = deg2rad(10.0)
 r = exp(-2.0*sig*sig)
 A = ( 0.375 + (0.5)*r + (0.125)*r^4 )
 B = ( 0.375 - (0.5)*r + (0.125)*r^4 )
 C = (0.125)*( 1 - r^4 )
 
+# Parse the command line arguments
 function parse_commandline()
   s = ArgParseSettings()
 
@@ -38,13 +65,21 @@ function parse_commandline()
   return parse_args(s)
 end
 
-function calc_radar_exponentialdsd(N0,lambda)
+# Calculate the radar variables using a prescribed gamma distribution
+function calc_radar_gamma_dsd(N0,lambda)
   # Define radar constants
+
+  # Fixed complex index of refraction
   eps = 8.88 + 0.63im
+
+  # Radar wavelength (mm)
   wavelength = 100
+
+  # Dielectric constant
   k = (abs2(eps) - 1)/(abs2(eps) +2)
 
   # Define the scattering amplitudes
+  # Pre-calculated using T-matrix scattering code from Mishchenko (2000)
   s_amp = Array(Complex64,16,2)
   s_amp = [ [5.93590e-05+(3.07940e-07)im] [-5.94150e-05+(-3.08530e-07)im]
             [4.70300e-04+(2.29610e-06)im] [-4.76460e-04+(-2.35930e-06)im]
@@ -69,7 +104,7 @@ function calc_radar_exponentialdsd(N0,lambda)
   zv = 0.0
   ql = 0.0
   mu = 0.0
-  h = 8.0/48.0
+  h = 8.0/48.0 # Simpson's composite rule (8.0 - 0.0)/ (16 * 3)
 
   for i in [1:17]
     if (i == 1) || (i == 17)
@@ -82,10 +117,12 @@ function calc_radar_exponentialdsd(N0,lambda)
       D = i*0.5
       N = N0*(D^mu)*exp(-lambda*D)
       ql += xam_r*N0*(D^(3.0+mu))*exp(-lambda*D)*intcoeff
+
       # Jung et al (2010,JAMC) Eqns (4) and (3)
       zv += ( B*abs2(s_amp[i,2]) + A*abs2(s_amp[i,1]) + 2*C*real( conj(s_amp[i,1])*s_amp[i,2] ) )*N*intcoeff
       zh += ( A*abs2(s_amp[i,2]) + B*abs2(s_amp[i,1]) + 2*C*real( conj(s_amp[i,1])*s_amp[i,2] ) )*N*intcoeff
    end
+
   ql *= h*1.0e-9
   zv *= h*(4*wavelength^4)/(pi^4*k^2)
   zh *= h*(4*wavelength^4)/(pi^4*k^2)
@@ -110,10 +147,16 @@ function calc_radar_exponentialdsd(N0,lambda)
   return Zdr, Zv, Zh, Za, ql
 end
 
+# Calculate the radar variables using a full bin DSD
+# This DSD follows the HUJI bin model output
 function calc_radar_fulldsd(dsd, flag, qrv, N0,lambda)
-  # Define radar constants
+  # Fixed complex index of refraction
   eps = 8.88 + 0.63im
+
+  # Radar wavelength (mm)
   wavelength = 100
+
+  # Dielectric constant
   k = (abs2(eps) - 1)/(abs2(eps) +2)
 
   # Define the scattering amplitudes
@@ -215,6 +258,7 @@ function calc_radar_fulldsd(dsd, flag, qrv, N0,lambda)
   return Zdr, Zv, Zh, Za, ql
 end
 
+# Read in the WRF output
 function read_nc_var(filename,varnames::Array)
   ###Read in Cartesian nc-file
   ###Only works as intended if you read in more than 1 variable
@@ -228,7 +272,8 @@ function read_nc_var(filename,varnames::Array)
   return collect(values(data))
 end
 
-@debug function write_ncfile(filename,lat,lon,lev,times,varnames)
+# Write out the radar variables
+function write_ncfile(filename,lat,lon,lev,times,varnames)
   ###Write to nc-file
   println("Write to nc file ...")
 
@@ -279,7 +324,7 @@ filein = args["input"]
 fileout = args["output"]
 dsdtype = args["dsdtype"]
 
-### Read in cartesian analysis
+### Read in Cartesian analysis
 println("Reading ",filein)
 fileinfo = ncinfo(filein)
 
@@ -333,6 +378,7 @@ elseif (dsdtype == "full")
   dsd = Array(Float32,33)
 end
 
+# Calculate the radar variables
 println("Calculating radar variables...")
 gamma1 = gamma(1. + xbm_r + xmu_r)
 gamma2 = gamma(1. + xmu_r)
@@ -366,10 +412,10 @@ for t in [1:d4]
             lambda = 1./20.E-3
           end
           if (dsdtype == "single")
-            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_exponentialdsd(N0,lambda)
+            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_gamma_dsd(N0,lambda)
           elseif (dsdtype == "double")
             N0 = nrv*xorg2*lambda^(1. + xmu_r)
-            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_exponentialdsd(N0,lambda)
+            ZDR[i,j,k,t], ZV[i,j,k,t], ZH[i,j,k,t], DBZ[i,j,k,t], ql[i,j,k,t] = calc_radar_gamma_dsd(N0,lambda)
           else
             if (i == 215 && j == 200 && k == 10 && t == 3)
               flag = true
