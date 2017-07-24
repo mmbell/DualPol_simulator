@@ -27,7 +27,7 @@
 using ArgParse
 using NetCDF
 using DataStructures
-using Debug
+#using Debug
 
 # Global constants
 xam_r = pi*997.0/6.0
@@ -80,7 +80,7 @@ function calc_radar_gamma_dsd(N0,lambda)
 
   # Define the scattering amplitudes
   # Pre-calculated using T-matrix scattering code from Mishchenko (2000)
-  s_amp = Array(Complex64,16,2)
+  s_amp = Array{Complex64}(16,2)
   s_amp = [ [5.93590e-05+(3.07940e-07)im] [-5.94150e-05+(-3.08530e-07)im]
             [4.70300e-04+(2.29610e-06)im] [-4.76460e-04+(-2.35930e-06)im]
             [1.55640e-03+(6.77020e-06)im] [-1.61730e-03+(-7.37320e-06)im]
@@ -106,7 +106,7 @@ function calc_radar_gamma_dsd(N0,lambda)
   mu = 0.0
   h = 8.0/48.0 # Simpson's composite rule (8.0 - 0.0)/ (16 * 3)
 
-  for i in [1:17]
+  for i in 1:17
     if (i == 1) || (i == 17)
       intcoeff = 1.0
     elseif (i%2 == 0)
@@ -160,7 +160,7 @@ function calc_radar_fulldsd(dsd, flag, qrv, N0,lambda)
   k = (abs2(eps) - 1)/(abs2(eps) +2)
 
   # Define the scattering amplitudes
-  s_amp = Array(Complex64,33,2)
+  s_amp = Array{Complex64}(33,2)
   s_amp = [ [3.03150e-11+(1.59470e-13)im] [-3.04840e-11+(-1.61260e-13)im] #0.00400
           [6.06310e-11+(3.18960e-13)im] [-6.09670e-11+(-3.22510e-13)im] #0.00500
           [1.21270e-10+(6.37940e-13)im] [-1.21930e-10+(-6.44990e-13)im] #0.00640
@@ -207,7 +207,7 @@ function calc_radar_fulldsd(dsd, flag, qrv, N0,lambda)
   Dprevious = 0.0
   zv1 = 0.0
   zh1 = 0.0
-  for i in [1:33]
+  for i in 1:33
     intcoeff = 1.0
     radius = r3^(1.0 / 3.0)
     mass = (4.0/3.0) * pi * r3 * 1.0e-6
@@ -266,7 +266,7 @@ function read_nc_var(filename,varnames::Array)
   data = OrderedDict()
 
   for varname in varnames
-    data[string(varname)] = ncread (filename, string(varname))
+    data[string(varname)] = ncread(filename, string(varname))
   end
 
   return collect(values(data))
@@ -278,26 +278,26 @@ function write_ncfile(filename,lat,lon,lev,times,varnames)
   println("Write to nc file ...")
 
   ncvars = NcVar[]
-  xatts = {"long_name" => "x (longitude)", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
-  yatts = {"long_name" => "y (latitude)",  "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
-  zatts = {"long_name" => "z (eta)",  "units" => "unitless", "missing_value" => -999, "_FillValue" => -999}
-  tatts = {"long_name" => "time (minutes)",  "units" => "min", "missing_value" => -999, "_FillValue" => -999}
-  x_dim = NcDim("east_west",[1:length(lon[:,1,1])],xatts)
-  y_dim = NcDim("south_north",[1:length(lat[:,1,1])],yatts)
-  z_dim = NcDim("bottom_top",[1:length(lev[:,1])],zatts)
-  t_dim = NcDim("Time",[1:length(times)],tatts)
+  xatts = Dict("long_name" => "x (longitude)", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
+  yatts = Dict("long_name" => "y (latitude)",  "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
+  zatts = Dict("long_name" => "z (eta)",  "units" => "unitless", "missing_value" => -999.0, "_FillValue" => -999.0)
+  tatts = Dict("long_name" => "time (minutes)",  "units" => "min", "missing_value" => -999.0, "_FillValue" => -999.0)
+  x_dim = NcDim("east_west",collect(1:length(lon[:,1,1])),xatts)
+  y_dim = NcDim("south_north",collect(1:length(lat[1,:,1])),yatts)
+  z_dim = NcDim("bottom_top",collect(1:length(lev[:,1])),zatts)
+  t_dim = NcDim("Time",collect(1:length(times)),tatts)
 
   for varname in varnames
-    atts  = {"long_name" => varname, "units" => "???", "missing_value" => -999, "_FillValue" => -999}
+    atts  = Dict("long_name" => varname, "units" => "???", "missing_value" => -999.0, "_FillValue" => -999.0)
     push!(ncvars,NcVar(varname,[x_dim,y_dim,z_dim,t_dim],atts,Float64))
   end
-  atts  = {"long_name" => "Latitude", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  atts  = Dict("long_name" => "Latitude", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
   push!(ncvars,NcVar("XLAT",[x_dim,y_dim,t_dim],atts,Float64))
-  atts  = {"long_name" => "Longitude", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  atts  = Dict("long_name" => "Longitude", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
   push!(ncvars,NcVar("XLON",[x_dim,y_dim,t_dim],atts,Float64))
-  atts  = {"long_name" => "Time", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  atts  = Dict("long_name" => "Time", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
   push!(ncvars,NcVar("XTIME",[t_dim],atts,Float64))
-  atts  = {"long_name" => "Eta Levels", "units" => "deg", "missing_value" => -999, "_FillValue" => -999}
+  atts  = Dict("long_name" => "Eta Levels", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
   push!(ncvars,NcVar("ZNU",[z_dim,t_dim],atts,Float64))
   nc = NetCDF.create(filename,ncvars)
 
@@ -347,10 +347,10 @@ elseif (dsdtype == "full")
   "ff1i17","ff1i18","ff1i19","ff1i20","ff1i21","ff1i22","ff1i23","ff1i24",
   "ff1i25","ff1i26","ff1i27","ff1i28","ff1i29","ff1i30","ff1i31","ff1i32",
   "ff1i33"]
-  dummyvar =  ncread (filein,"QRAIN")
+  dummyvar =  ncread(filein,"QRAIN")
   ff1 = Array(Array{Float32,4},33)
-  for d in [1:33]
-    ff1[d] = similar(dummyvar); fill!(ff1[d], -999)
+  for d in 1:33
+    ff1[d] = similar(dummyvar); fill!(ff1[d], -999.0)
   end
   ( qrain,qnrain,qv,pb,pp,theta,refl,
   ff1[1],ff1[2],ff1[3],ff1[4],ff1[5],ff1[6],ff1[7],ff1[8],
@@ -365,15 +365,15 @@ end
 d1,d2,d3,d4 = size(qrain)
 
 # Initialize new radar variables
-ZDR      = similar(qrain); fill!(ZDR, -999)
-ZV       = similar(qrain); fill!(ZV, -999)
-ZH       = similar(qrain); fill!(ZH, -999)
-DBZ      = similar(qrain); fill!(DBZ, -999)
-Zdiff    = similar(qrain); fill!(Zdiff, -999)
-ql       = similar(qrain); fill!(ql, -999)
-qdiff    = similar(qrain); fill!(qdiff, -999)
+ZDR      = similar(qrain); fill!(ZDR, -999.0)
+ZV       = similar(qrain); fill!(ZV, -999.0)
+ZH       = similar(qrain); fill!(ZH, -999.0)
+DBZ      = similar(qrain); fill!(DBZ, -999.0)
+Zdiff    = similar(qrain); fill!(Zdiff, -999.0)
+ql       = similar(qrain); fill!(ql, -999.0)
+qdiff    = similar(qrain); fill!(qdiff, -999.0)
 if (dsdtype == "single")
-  qnrain = similar(qrain); fill!(qnrain, -999)
+  qnrain = similar(qrain); fill!(qnrain, -999.0)
 elseif (dsdtype == "full")
   dsd = Array(Float32,33)
 end
@@ -383,10 +383,10 @@ println("Calculating radar variables...")
 gamma1 = gamma(1. + xbm_r + xmu_r)
 gamma2 = gamma(1. + xmu_r)
 xorg2 = 1.0/gamma2
-for t in [1:d4]
-  for k in [1:d3]
-    for j in [1:d2]
-      for i in [1:d1]
+for t in 1:d4
+  for k in 1:d3
+    for j in 1:d2
+      for i in 1:d1
         qvapor = max(1.0e-10,qv[i,j,k,t])
         pressure = pb[i,j,k,t]+pp[i,j,k,t]
         tempk = (theta[i,j,k,t]+300.0)*(pressure/100000.0)^(2.0/7.0)
