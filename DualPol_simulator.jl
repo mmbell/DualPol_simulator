@@ -24,9 +24,7 @@
 # species will be added in due course
 #
 
-using ArgParse
-using NetCDF
-using DataStructures
+using ArgParse, NetCDF, DataStructures, SpecialFunctions
 #using Debug
 
 # Global constants
@@ -277,30 +275,39 @@ function write_ncfile(filename,lat,lon,lev,times,varnames)
   ###Write to nc-file
   println("Write to nc file ...")
 
+  mv = convert(Float32,-999.0)
+
   ncvars = NcVar[]
-  xatts = Dict("long_name" => "x (longitude)", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
-  yatts = Dict("long_name" => "y (latitude)",  "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
-  zatts = Dict("long_name" => "z (eta)",  "units" => "unitless", "missing_value" => -999.0, "_FillValue" => -999.0)
-  tatts = Dict("long_name" => "time (minutes)",  "units" => "min", "missing_value" => -999.0, "_FillValue" => -999.0)
-  x_dim = NcDim("east_west",collect(1:length(lon[:,1,1])),xatts)
-  y_dim = NcDim("south_north",collect(1:length(lat[1,:,1])),yatts)
-  z_dim = NcDim("bottom_top",collect(1:length(lev[:,1])),zatts)
-  t_dim = NcDim("Time",collect(1:length(times)),tatts)
+  xatts = Dict("long_name" => "x (longitude)", "units" => "deg", "missing_value" => mv, "_FillValue" => mv)
+  yatts = Dict("long_name" => "y (latitude)",  "units" => "deg", "missing_value" => mv, "_FillValue" => mv)
+  zatts = Dict("long_name" => "z (eta)",  "units" => "unitless", "missing_value" => mv, "_FillValue" => mv)
+  tatts = Dict("long_name" => "time (minutes)",  "units" => "min", "missing_value" => mv, "_FillValue" => mv)
+  #x_dim = NcDim("east_west",collect(1:length(lon[:,1,1])),atts=xatts)
+  #y_dim = NcDim("south_north",collect(1:length(lat[1,:,1])),atts=yatts)
+  #z_dim = NcDim("bottom_top",collect(1:length(lev[:,1])),atts=zatts)
+  #t_dim = NcDim("Time",collect(1:length(times)),atts=tatts)
+  x_dim = NcDim("east_west",collect(1:length(lon[:,1,1])))
+  y_dim = NcDim("south_north",collect(1:length(lat[1,:,1])))
+  z_dim = NcDim("bottom_top",collect(1:length(lev[:,1])))
+  t_dim = NcDim("Time",collect(1:length(times)))
 
   for varname in varnames
-    atts  = Dict("long_name" => varname, "units" => "???", "missing_value" => -999.0, "_FillValue" => -999.0)
-    push!(ncvars,NcVar(varname,[x_dim,y_dim,z_dim,t_dim],atts,Float64))
+    atts  = Dict("long_name" => varname, "units" => "???", "missing_value" => mv, "_FillValue" => mv)
+    push!(ncvars,NetCDF.NcVar(varname,[x_dim,y_dim,z_dim,t_dim],atts=atts,t=Float32))
   end
-  atts  = Dict("long_name" => "Latitude", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
-  push!(ncvars,NcVar("XLAT",[x_dim,y_dim,t_dim],atts,Float64))
-  atts  = Dict("long_name" => "Longitude", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
-  push!(ncvars,NcVar("XLON",[x_dim,y_dim,t_dim],atts,Float64))
-  atts  = Dict("long_name" => "Time", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
-  push!(ncvars,NcVar("XTIME",[t_dim],atts,Float64))
-  atts  = Dict("long_name" => "Eta Levels", "units" => "deg", "missing_value" => -999.0, "_FillValue" => -999.0)
-  push!(ncvars,NcVar("ZNU",[z_dim,t_dim],atts,Float64))
+  atts  = Dict("long_name" => "Latitude", "units" => "deg", "missing_value" => mv, "_FillValue" => mv)
+  push!(ncvars,NetCDF.NcVar("XLAT",[x_dim,y_dim,t_dim],atts=atts,t=Float32))
+  atts  = Dict("long_name" => "Longitude", "units" => "deg", "missing_value" => mv, "_FillValue" => mv)
+  push!(ncvars,NetCDF.NcVar("XLON",[x_dim,y_dim,t_dim],atts=atts,t=Float32))
+  atts  = Dict("long_name" => "Time", "units" => "deg", "missing_value" => mv, "_FillValue" => mv)
+  push!(ncvars,NetCDF.NcVar("XTIME",[t_dim],atts=atts,t=Float32))
+  atts  = Dict("long_name" => "Eta Levels", "units" => "deg", "missing_value" => mv, "_FillValue" => mv)
+  push!(ncvars,NetCDF.NcVar("ZNU",[z_dim,t_dim],atts=atts,t=Float32))
+  println(filename)
+  #println(ncvars)
+  # Create the output NetCDF file
+  isfile(filename) ? rm(filename) : nothing
   nc = NetCDF.create(filename,ncvars)
-
   NetCDF.putvar(nc,"REFL_10CM",refl)
   NetCDF.putvar(nc,"ZDR",ZDR)
   NetCDF.putvar(nc,"ZV",ZV)
@@ -313,9 +320,8 @@ function write_ncfile(filename,lat,lon,lev,times,varnames)
   NetCDF.putvar(nc,"XLON",lon)
   NetCDF.putvar(nc,"XTIME",times)
   NetCDF.putvar(nc,"ZNU",lev)
-
-  NetCDF.close(nc)
-  return 0
+  NetCDF.ncclose(filename)
+  return nothing
 end
 
 # Main program
