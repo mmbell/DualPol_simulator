@@ -1,0 +1,3 @@
+gfortran -fpic -g -c ampld.juliasub.f
+gfortran -fpic -g -c lpd.f
+gfortran -shared -o libtmatrix.so ampld.juliasub.o lpd.o
